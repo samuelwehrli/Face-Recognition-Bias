@@ -2,3 +2,10 @@
 .gitattributes
 html/*
 archive/*
+*.pyc
+latex/.pdf
+latex/bias-eps-converted-to.pdf
+latex/linear_clustering_removal.aux
+latex/linear_clustering_removal.log
+latex/linear_clustering_removal.synctex.gz
+latex/projection-eps-converted-to.pdf
