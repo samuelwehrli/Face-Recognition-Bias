@@ -103,7 +103,9 @@ Davies-Bouldin score & 3.8 & 2.8x$10^6$
 
 \section{Face recognition rates and bias}
 
-Face recognition rates and bias are evaluated with the RFW data set. The RFW dataset provides image (i.e. embedding) pairs corresponding to the same or to different persons. The resulting task is a binary classification of the pairs into ``same'' and ``different''. The recognition rate is the accuracy of the corresponding classification. The feature used for the classification is the pair distance in the embedding space. Here we use the cosine distance:
+\subsection{Positive / negative pair metric}
+
+Face recognition rates and bias are evaluated with the RFW data set. The RFW dataset provides image (i.e. embedding) pairs corresponding to the same or to different persons. The resulting task is a binary classification of the pairs into ``same'' and ``different''. Note that pairs are withing the ethnic group (which turns out to be critical, as shown in the next subsection). The recognition rate is the accuracy of the corresponding classification. The feature used for the classification is the pair distance in the embedding space. Here we use the cosine distance:
 
 \begin{equation}
 \label{eq:cos}
@@ -137,9 +139,52 @@ African & 84\% &    86\%      &  84\% & 85\%    &  76\% & 79\%
   \label{fig:frrate}
 \end{figure}
 
+\subsection{Nearest neighbor metric}
+
+Given a set of images, an alternative way to assess bias is to look at the nearest neighbors and whether the corresponding images belong to the same person or not. This can again be done for the \emph{aware}  and  \emph{blinded} emdeddings. Again, the cosine distance is used as defined in Eq.~(\ref{eq:cos}). The result is shown in Tab.~\ref{tab:nnrate} together with error rates which show whether nearest neighbors belong to the same ethnic group or to a different one (if it is not the same person). With this metric, the blinding reduces performance. Altough the confusion with persons of the same ethnic group is reduced upon blinding, confusion with persons from different ethnic groups overcompensates the reduction leading to an overall performance decrease.   
+
+\begin{table}
+\begin{center}
+\begin{tabular}{ c|c|c | c||c | c|c }
+        & aware  & aware  & aware  & blinded  & blinded  & blinded  \\
+     & acc & err. rate & err. rate & acc & err. rate & err. rate \\
+     &  & eq. group  & diff. group &  & eq. group  & diff. group  \\
+\hline
+Caucasian & 90\% &  8\%    &  2\% & 86\%    &  6\% & 8\% \\  
+Indian       & 85\% & 13\%   &  2\% & 83\%    &  9\% & 8\%\\ 
+Asian        & 83\% & 16\%   &  1\% & 80\%    &  13\% & 7\%\\ 
+African      & 80\% & 19\%   &  1\% & 78\%    &  16\% & 6\% 
+\end{tabular}
+\end{center}
+\caption{Face recognition rates by nearest neighbor metric for \emph{aware}  and  \emph{blinded} emdeddings and the $N_e=128$ model. Accuracies are given for each ethnic group. Errors correspond to the remaining accuracy gap. If the nearest neighbor does not belong to the same person, the equal group error rate indicates whether the nearest neighbor belongs to the same group. Similarly, the different group error rate corresponds to nearest neighbors of a different ethnic group.}
+\label{tab:nnrate}
+\end{table}
+
+
 \section{Discussion}
 
-Most of the findings with regard to the blinding procedures are not surprising. The proposed procedure removes linear separability with the effect that linear classifiers can't distinguish between ethnic clusters after blinding in line with the cluster scores. The fact that the ethnic clusters are well separated in the first place shows that the considered model clearly distinguishes the ethnic groups. The blinding removes this separation. The surprise comes at the end. The removal of this information actually improves overall performance and slightly reduces bias. The performance improvement through this simple linear approach is very surprising. A reason might be that there are a substantial differences between the data used for training of the model and the RFW data used for present benchmark. At this stage it is not clear, whether this performance improvement is accidental or generalizes to other models and other discriminatory dimensions.
+The proposed procedure removes linear separability with the effect that linear classifiers can't distinguish between ethnic clusters after blinding. Clustering as measured by cluster validation scores completely vanishes with this blinding procedures. This leads to the first insight
+
+\begin{quote}
+    Cluster validation scores are not a measure of bias. They indicate whether linear classifiers can predict clusters of the discriminatory dimension - a property which is related to awareness.
+ \end{quote}
+
+\noindent The fact that the ethnic clusters are well separated in the first place shows that the considered model clearly distinguishes the ethnic groups. The blinding removes this separation. 
+
+Two measures were considered to assess face recognition rates and bias:
+
+\begin{enumerate}
+	\item Classification of positive and negative pairs 
+	\item Nearest neighbors
+\end{enumerate}
+
+\noindent To my knowledge, the first method is widely used. Surprisingly, the performance increases and and the bias is slightly reduced. With the second measure, performance is significantly reduced and bias again slightly. The reason for the different outcomes is the fact that the pair method only uses pairs within the same ethnic cluster and blinding actually increases the performance within a given cluster. This leads to the second insight
+
+\begin{quote}
+    Measuring face recognition rates and bias with a pair approach can be misleading when images of any given pairs are within the same cluster. 
+ \end{quote}
+
+\noindent Yet another (commonly used) way of how not to measure bias was identified...
 
 
 \end{document}
