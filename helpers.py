@@ -3,12 +3,110 @@ import numpy as np
 from scipy.linalg import orth
 from scipy.spatial.distance import cosine
 
+import sys, os
+sys.path.insert(1,r'C:\Users\wehs\Documents\GitHub\Helpers')
+import datasetloader as dsl
 
+
+class H5Reader2:
+    race_list = ['Caucasian','Indian','Asian','African']        
+    gender_list = ['Female','Male']
+    age_list = ['<30','30-45','45+']
+    
+    def __init__(self):
+        # generate dataframe for the different datasets
+        path = r'C:\Daten\FaceRecognitionBias\vgg2\embeddings\senet50_128*.h5'
+        file_tagger = lambda file: {'race': os.path.split(file)[1].split('_')[3], 'model':'VGG128'} 
+        ddf = dsl.h5_files_ddf(path, file_tagger=file_tagger) 
+       
+        path = r'C:\Daten\FaceRecognitionBias\vgg2\embeddings\senet50_256*.h5'
+        file_tagger = lambda file: {'race': os.path.split(file)[1].split('_')[3], 'model':'VGG256'} 
+        ddf = ddf.append(dsl.h5_files_ddf(path, file_tagger=file_tagger)) 
+       
+        path = r'C:\Daten\FaceRecognitionBias\vgg2\embeddings\senet50_ft*.h5'
+        file_tagger = lambda file: {'race': os.path.split(file)[1].split('_')[3], 'model':'VGGft'} 
+        ddf = ddf.append(dsl.h5_files_ddf(path, file_tagger=file_tagger)) 
+       
+        path = r'C:\Daten\FaceRecognitionBias\OpenFace\embeddings\*.h5'
+        file_tagger = lambda file: {'race': os.path.split(file)[1].split('_')[1], 'model':'OpenFace'}        
+        ddf = ddf.append(dsl.h5_files_ddf(path, file_tagger=file_tagger))
+    
+        path = r'C:\Daten\FaceRecognitionBias\FRbias-facenet\results\embeddings\*.h5'
+        file_tagger = lambda file: {'race': os.path.split(file)[1].split('.')[0].split('_')[1], 'model':'FaceNet'}        
+        ddf = ddf.append(dsl.h5_files_ddf(path, file_tagger=file_tagger, ))
+    
+        self.model_list = list(ddf['tag_model'].unique())
+        ddf['tag_race'] = ddf['tag_race'].astype('category').cat.set_categories(self.race_list)     
+        ddf['tag_model'] = ddf['tag_model'].astype('category').cat.set_categories(self.model_list)     
+        self.ddf = ddf.sort_values(by=['tag_model','tag_race']).reset_index(drop=True)
+        
+        # generate dataframe with gender and age for each subject
+        path = r'C:\Daten\FaceRecognitionBias\age-gender-estimation\results\*.h5'
+        file_tagger = lambda file: {'race': os.path.split(file)[1].split('_')[1]}        
+        agddf = dsl.h5_files_ddf(path, file_tagger=file_tagger)
+        agdf, _ = dsl.load(agddf.query("arg_key=='images'"))
+        agdf['subject'] = agdf['class'] + '_' +agdf.subject.apply(lambda s: s.split('.')[1]).values     
+        agdf = agdf.groupby('subject')[['age','gender']].mean()
+
+        gfun = lambda x: self.gender_list[x < 0.5]
+        agdf['gender'] = (agdf['gender'].apply(gfun)
+                          .astype('category')
+                          .cat.set_categories(self.gender_list)  )
+
+        afun = lambda x: self.age_list[1-(x<30)+(x>=45)] 
+        agdf['age'] = (agdf['age'].apply(afun)
+                       .astype('category')
+                       .cat.set_categories(self.age_list) )  
+        self.agegen_df = agdf        
+                
+    def read(self, model,embeddings_key='embeddings'):
+        """
+        Reads the data for a given model (VGG128, VGG256, VGGft, OpenFace)
+        
+        Paremeters
+        ----------
+        
+        model: string
+            name of the model
+            
+        Output
+        ------
+        
+        X: The embeddings
+        
+        df: Dataframe with different labels
+            They can be mapped to numberical values by df.race.cat.codes.values
+        """
+        # load empeddings
+        sel = (self.ddf['tag_model'] == model) & (self.ddf['arg_key']==embeddings_key) 
+        Xdf, tag_df = dsl.load(self.ddf[sel])
+        tag_df['race'].cat.set_categories(self.race_list,inplace=True) 
+        
+        # load image and subject labels
+        sel = (self.ddf['tag_model'] == model) & (self.ddf['arg_key']=='images') 
+        df, _ = dsl.load(self.ddf[sel])      
+        df['img'] = df['class'] + '_' + df.img.apply(lambda s: s.split('.')[1]).values
+        df['subject'] = df['class'] + '_' + df.subject.apply(lambda s: s.split('.')[1]).values
+        
+        # join
+        df = pd.concat([tag_df,df],1)
+        df = df.drop(columns=['class','model'])
+       
+        # add gender and age
+        for col in ['age','gender']:
+            df.insert(2,col,self.agegen_df[col].reindex(df.subject).values)
+        
+        return Xdf.values, df
+
+# ----------------------------------------------------------------------------------------
+    
 class H5Reader:
     pattern = r'C:\Daten\FaceRecognitionBias\vgg2\embeddings\{net}_pytorch_{race}_normed_BGR.h5'
     race_list = ['Caucasian','Indian','Asian','African']
     net_list = ['senet50_128','senet50_256','senet50_ft']
     
+    age_gender_pattern = r'C:\Daten\FaceRecognitionBias\age-gender-estimation\results\weights.28-3.73_{race}.h5'
+
     
     def __init__(self, net):
         self.net = net
@@ -49,9 +147,29 @@ class H5Reader:
                 
         return pd.concat(out,0).set_index('race_index').reset_index()
     
-    def read_pair_labels(self, N=None, select = 'head'):
+    def read_img_labels(self, N=None, select = 'head', idonly = False):
         df = self.read_all(key='/images',N=N, select=select)
-        return (df['class'] + '_' + df.img.apply(lambda s: s[:-4].split('.')[1])).values
+        out = (df['class'] + '_' + df.img.apply(lambda s: s[:-4].split('.')[1])).values
+        if idonly:
+            out = [label.split('_')[1] for label in out]
+        return out
+        
+    read_pair_labels = read_img_labels  # old notation   
+
+    def read_age_gender(self, N=None, select = 'head', key = 'images'):
+        agdf = []
+        for race in self.race_list:
+            path = self.age_gender_pattern.format(race = race)
+            agdf.append(pd.read_hdf(path, key))
+        agdf = pd.concat(agdf,0).reset_index(drop=True)
+        agdf['id'] = agdf.subject.apply(lambda s: s.split('.')[1])
+        agdf = agdf.groupby('id')[['age','gender']].mean()
+        tmp = agdf.gender.values
+        tmp[tmp==0.5] = np.nan
+        agdf.gender = tmp.round().astype(int)
+        img_ids = self.read_img_labels(N=N, select=select, idonly=True)
+        agdf = agdf.reindex(img_ids).reset_index()
+        return agdf
         
                 
     def keys(self, race_prefix):    
@@ -98,7 +216,52 @@ class ClusterCenterProjection:
     def blind(self, X):
         return X - self.project(X,keepdims=True)
     
- # ------------------------------------------------------------------------------------------
+    
+# function for blinding
+def blind(Xin, *args, verbose = True):
+    X = Xin.astype(np.float64)
+    Ne = X.shape[1]  # size of the empedding space
+    V = np.zeros([0,Ne])
+    
+    V = []
+    for y in args:
+        y_unique = np.unique(y[np.isfinite(y)]).astype(int)
+        centers = np.array([np.mean(X[y==k,:],0) for k in y_unique])  # centers of the clusters
+        V.append(np.array([centers[k] - np.mean(centers[y_unique!=k,:],0) for k in y_unique])) 
+        
+    V = np.concatenate(V,0)
+    U = V / np.linalg.norm(V,axis=1,keepdims=True) # normalizing
+    B = orth(U.T).T  # orthogal basis spanned by the vectors
+    P = np.eye(Ne) - np.matmul(B.T,B)  # construct projection matrix
+    Xb = np.matmul(X,P) # projection
+    
+    if verbose:
+        print('eigenvalues of B =',np.linalg.svd(B)[1]) # as a check
+
+    return Xb.astype(np.float32), U.astype(np.float32)
+
+# ------------------------------------------------------------------------------------------
+
+from sklearn.model_selection import GroupKFold
+class ModelBenchmarker:
+    def __init__(self, imglabel, n_splits=2):
+        group_kfold = GroupKFold(n_splits=n_splits)
+        self.indices = [res for res in group_kfold.split(imglabel, groups=imglabel)]
+                  
+    def predict(self, clf, X, y):
+        y_pred = np.zeros(y.shape)
+        for itrain,itest in self.indices:            
+            X_train = X[itrain,:] 
+            y_train = y[itrain] 
+            good = np.isfinite(y_train)
+            X_train = X_train[good,:]
+            y_train = y_train[good]
+   
+            clf.fit(X_train, y_train)
+            y_pred[itest] = clf.predict(X[itest,:])
+        return y_pred.astype(np.uint8)
+        
+# ------------------------------------------------------------------------------------------
 
 class RFWDistances:
     pattern = r'C:\Daten\FaceRecognitionBias\RFW\{race}\{race}_pairs.txt'
@@ -148,4 +311,30 @@ class RFWDistances:
         X1 = X1 / np.linalg.norm(X1, axis=1, keepdims=True)
         X2 = X2 / np.linalg.norm(X2, axis=1, keepdims=True)
         return pd.concat([self._df.copy(), pd.DataFrame(X1*X2)],1)
+    
+# ------------------------------------------------------------------------------------------
+
+# add column to hdf store
+def hdf_add_col(path, key, col, data):
+    with pd.HDFStore(path) as store:
+        keys = store.keys()
+    if key in [key.strip('/') for key in keys]:
+        df = pd.read_hdf(path, key)
+        df[col] = data
+    else:
+        df = pd.DataFrame(data,columns=[col])
+    df.to_hdf(path, key)
+    
+    
+# generator function to loop over all embeddings
+def X_generator(X_dict, y_args_dict,verbose=False,cosine=True):
+    for model, X in X_dict.items():
+        for blinding, y_args in y_args_dict.items():
+            if len(y_args) == 0:
+                yield model+'-'+blinding+'-e',X
+            else:
+                Xb = blind(X,*y_args,verbose=verbose)[0]
+                yield model+'-'+blinding+'-e',Xb
+                if cosine:
+                    yield model+'-'+blinding+'-c',Xb/np.linalg.norm(Xb,axis=1,keepdims=True)
     
